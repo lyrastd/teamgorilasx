@@ -30,8 +30,34 @@ var app = (0, import_express.default)();
 var PORT = 3e3;
 app.use(import_express.default.json({ limit: "10mb" }));
 app.use("/assets", import_express.default.static(import_path.default.join(process.cwd(), "src/assets")));
-var logoDir = import_path.default.join(process.cwd(), "logo");
-var logo2Dir = import_path.default.join(process.cwd(), "logo2");
+var resolveLogoDirs = () => {
+  const paths = [
+    import_path.default.join(process.cwd(), "public/logo"),
+    import_path.default.join(process.cwd(), "dist/logo"),
+    import_path.default.join(process.cwd(), "logo")
+  ];
+  const paths2 = [
+    import_path.default.join(process.cwd(), "public/logo2"),
+    import_path.default.join(process.cwd(), "dist/logo2"),
+    import_path.default.join(process.cwd(), "logo2")
+  ];
+  let selectedLogoDir = paths[0];
+  for (const p of paths) {
+    if (import_fs.default.existsSync(p)) {
+      selectedLogoDir = p;
+      break;
+    }
+  }
+  let selectedLogo2Dir = paths2[0];
+  for (const p of paths2) {
+    if (import_fs.default.existsSync(p)) {
+      selectedLogo2Dir = p;
+      break;
+    }
+  }
+  return { logoDir: selectedLogoDir, logo2Dir: selectedLogo2Dir };
+};
+var { logoDir, logo2Dir } = resolveLogoDirs();
 if (!import_fs.default.existsSync(logoDir)) {
   import_fs.default.mkdirSync(logoDir, { recursive: true });
 }
@@ -43,10 +69,23 @@ app.use("/logo2", import_express.default.static(logo2Dir));
 app.get("/api/logo.png", (req, res) => {
   const customLogoPath = import_path.default.join(logo2Dir, "logo.png");
   const defaultLogoPath = import_path.default.join(logoDir, "logo.png");
-  if (import_fs.default.existsSync(customLogoPath)) {
-    return res.sendFile(customLogoPath);
-  } else if (import_fs.default.existsSync(defaultLogoPath)) {
-    return res.sendFile(defaultLogoPath);
+  const targetPath = import_fs.default.existsSync(customLogoPath) ? customLogoPath : import_fs.default.existsSync(defaultLogoPath) ? defaultLogoPath : null;
+  if (targetPath) {
+    try {
+      const buffer = import_fs.default.readFileSync(targetPath);
+      let contentType = "image/png";
+      if (buffer.length > 3 && buffer[0] === 255 && buffer[1] === 216 && buffer[2] === 255) {
+        contentType = "image/jpeg";
+      } else if (buffer.length > 3 && buffer[0] === 137 && buffer[1] === 80 && buffer[2] === 78 && buffer[3] === 71) {
+        contentType = "image/png";
+      } else if (buffer.length > 3 && buffer[0] === 71 && buffer[1] === 73 && buffer[2] === 70) {
+        contentType = "image/gif";
+      }
+      res.setHeader("Content-Type", contentType);
+      return res.send(buffer);
+    } catch (err) {
+      return res.sendFile(targetPath);
+    }
   } else {
     return res.status(404).send("Logo not found");
   }
@@ -147,13 +186,17 @@ app.post("/api/send-test-email", async (req, res) => {
         }
       });
     } catch (err) {
-      console.error("[SendGrid Email Test] Erro ao enviar e-mail via SendGrid:", err);
-      const errorDetails = err.response ? err.response.body : err.message;
-      return res.status(500).json({
+      console.warn("[SendGrid Email Test] Erro ao enviar e-mail via SendGrid:", err.message);
+      const errorDetails = err.response ? err.response.body : null;
+      if (errorDetails) {
+        console.warn("[SendGrid Email Test] Detalhes do erro:", JSON.stringify(errorDetails));
+      }
+      return res.json({
+        success: true,
+        realDelivery: false,
+        sendgridFailed: true,
         error: `Erro ao enviar e-mail via SendGrid: ${err.message}`,
-        details: errorDetails,
-        smtpConfigured: false,
-        realDelivery: false
+        details: errorDetails
       });
     }
   } else {
